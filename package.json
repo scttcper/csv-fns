@@ -2,11 +2,12 @@
   "name": "csv-fns",
   "version": "0.0.0-placeholder",
   "description": "",
-  "author": "Scott Cooper <scott.cooper@zumepizza.com>",
+  "author": "Scott Cooper <scttcper@gmail.com>",
   "license": "MIT",
-  "repository": "",
+  "repository": "scttcper/csv-fns",
   "keywords": [
-    "typescript"
+    "typescript",
+    "csv"
   ],
   "source": "src/index.ts",
   "main": "./csv-fns.js",
@@ -19,7 +20,7 @@
     "prebuild": "rimraf dist",
     "build": "microbundle build --target node --format cjs,es -o dist",
     "postbuild": "cp package.json dist && cp LICENSE dist && cp README.md dist && rimraf dist/test",
-    "build:docs": "typedoc --out docs --target es6 --theme minimal --mode file src && touch docs/.nojekyll",
+    "watch-ts": "tsc -w",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:prod": "npm run test -- --coverage --no-cache",
@@ -29,27 +30,37 @@
   "dependencies": {},
   "devDependencies": {
     "@types/jest": "23.3.9",
-    "@types/node": "10.12.2",
+    "@types/node": "10.12.9",
+    "csv-spectrum": "^1.0.0",
     "jest": "23.6.0",
     "microbundle": "0.7.0",
-    "prettier": "1.14.3",
+    "prettier": "1.15.2",
     "rimraf": "2.6.2",
-    "semantic-release": "15.10.7",
+    "semantic-release": "15.12.0",
     "travis-deploy-once": "5.0.9",
     "ts-jest": "23.10.4",
     "ts-node": "7.0.1",
     "tslint": "5.11.0",
-    "tslint-config-prettier": "1.15.0",
-    "tslint-xo": "0.9.0",
-    "typedoc": "0.13.0",
+    "tslint-config-prettier": "1.16.0",
+    "tslint-xo": "0.10.0",
     "typescript": "3.1.6"
   },
   "release": {
     "branch": "master"
   },
   "jest": {
-    "preset": "ts-jest",
-    "collectCoverage": true
+    "roots": [
+      "<rootDir>/test"
+    ],
+    "transform": {
+      "^.+\\.tsx?$": "ts-jest"
+    },
+    "testEnvironment": "node",
+    "testRegex": "(/__tests__/.*|(\\.|/)(test|spec))\\.ts$",
+    "moduleFileExtensions": [
+      "ts",
+      "js"
+    ]
   },
   "engines": {
     "node": ">=8.0.0"

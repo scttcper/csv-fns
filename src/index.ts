@@ -1,29 +1,26 @@
 const RECORD_SEP = String.fromCharCode(30);
 const UNIT_SEP = String.fromCharCode(31);
 const DEFAULT_DELIMITER = ',';
-const fields = []; // Fields are from the header row of the input, if there is one
 const FLOAT = /^\s*-?(\d*\.?\d+|\d+\.?\d*)(e[-+]?\d+)?\s*$/i;
 const ISO_DATE = /(\d{4}-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\d\.\d+([+-][0-2]\d:[0-5]\d|Z))|(\d{4}-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\d([+-][0-2]\d:[0-5]\d|Z))|(\d{4}-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d([+-][0-2]\d:[0-5]\d|Z))/;
 const BYTE_ORDER_MARK = '\ufeff';
 const BAD_DELIMITERS = ['\r', '\n', '"', BYTE_ORDER_MARK];
 
-function needsHeaderRow(config) {
+function needsHeaderRow(config: Config, fields) {
   return config.header && fields.length === 0;
 }
 
-function fillHeaderFields(results, config) {
+function fillHeaderFields(results, config: Config) {
   if (!results) {
     return;
   }
-  for (let i = 0; needsHeaderRow(config) && i < results.data.length; i++) {
-    for (let j = 0; j < results.data[i].length; j++) {
-      let header = results.data[i][j];
-
+  for (let i = 0; needsHeaderRow(config, results.fields) && i < results.data.length; i++) {
+    for (let header of results.data[i]) {
       if (config.trimHeaders) {
         header = header.trim();
       }
 
-      fields.push(header);
+      results.fields.push(header);
     }
   }
   results.data.splice(0, 1);
@@ -36,9 +33,7 @@ export function guessDelimiter(input, results, newline, skipEmptyLines, comments
   let bestDelta;
   let fieldCountPrevRow;
 
-  for (let i = 0; i < delimChoices.length; i++) {
-    const delim = delimChoices[i];
-    console.log({ delim });
+  for (const delim of delimChoices) {
     let delta = 0;
     let avgFieldCount = 0;
     let emptyLinesCount = 0;
@@ -51,18 +46,19 @@ export function guessDelimiter(input, results, newline, skipEmptyLines, comments
       preview: 10,
     });
 
-    for (let j = 0; j < preview.data.length; j++) {
-      if (skipEmptyLines && testEmptyLine(preview.data[j])) {
+    for (const line of preview.data) {
+      if (skipEmptyLines && testEmptyLine(line, skipEmptyLines)) {
         emptyLinesCount++;
         continue;
       }
-      const fieldCount = preview.data[j].length;
+      const fieldCount = line.length;
       avgFieldCount += fieldCount;
 
-      if (typeof fieldCountPrevRow === 'undefined') {
+      if (fieldCountPrevRow === undefined) {
         fieldCountPrevRow = fieldCount;
         continue;
-      } else if (fieldCount > 1) {
+      }
+      if (fieldCount > 1) {
         delta += Math.abs(fieldCount - fieldCountPrevRow);
         fieldCountPrevRow = fieldCount;
       }
@@ -72,7 +68,7 @@ export function guessDelimiter(input, results, newline, skipEmptyLines, comments
       avgFieldCount /= preview.data.length - emptyLinesCount;
     }
 
-    if ((typeof bestDelta === 'undefined' || delta < bestDelta) && avgFieldCount > 1.99) {
+    if ((bestDelta === undefined || delta < bestDelta) && avgFieldCount > 1.99) {
       bestDelta = delta;
       bestDelim = delim;
     }
@@ -84,27 +80,27 @@ export function guessDelimiter(input, results, newline, skipEmptyLines, comments
   };
 }
 
-/** https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions */
+/**
+ * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions
+ */
 function escapeRegExp(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
 }
 
-function testEmptyLine(s) {
-  return s.length === 1 && s[0].length === 0;
-  // return skipEmptyLines === 'greedy'
-  //   ? s.join('').trim() === ''
-  //   : s.length === 1 && s[0].length === 0;
+function testEmptyLine(s, skipEmptyLines: Config['skipEmptyLines']) {
+  return skipEmptyLines === 'greedy'
+    ? s.join('').trim() === ''
+    : s.length === 1 && s[0].length === 0;
 }
 
-function guessLineEndings(input, quoteChar) {
-  input = input.substr(0, 1024 * 1024); // max length 1 MB
+function guessLineEndings(input: string, quoteChar) {
+  let inputPiece = input.substr(0, 1024 * 1024); // max length 1 MB
   // Replace all the text inside quotes
-  const re = new RegExp(escapeRegExp(quoteChar) + '([^]*?)' + escapeRegExp(quoteChar), 'gm');
-  input = input.replace(re, '');
+  const re = new RegExp(`${escapeRegExp(quoteChar)}([^]*?)${escapeRegExp(quoteChar)}`, 'gm');
+  inputPiece = inputPiece.replace(re, '');
 
-  const r = input.split('\r');
-
-  const n = input.split('\n');
+  const r = inputPiece.split('\r');
+  const n = inputPiece.split('\n');
 
   const nAppearsFirst = n.length > 1 && n[0].length < r[0].length;
 
@@ -113,8 +109,8 @@ function guessLineEndings(input, quoteChar) {
   }
 
   let numWithN = 0;
-  for (let i = 0; i < r.length; i++) {
-    if (r[i][0] === '\n') {
+  for (const g of r) {
+    if (g[0] === '\n') {
       numWithN++;
     }
   }
@@ -122,53 +118,40 @@ function guessLineEndings(input, quoteChar) {
   return numWithN >= r.length / 2 ? '\r\n' : '\r';
 }
 
-function bindFunction(f, self) {
-  return function() {
-    f.apply(self, arguments);
-  };
-}
-
-function isFunction(func) {
-  return typeof func === 'function';
-}
-
-/**
- * Makes a deep copy of an array or object (mostly)
- */
-function copy(obj) {
-  if (typeof obj !== 'object' || obj === null) {
-    return obj;
-  }
-  const cpy = Array.isArray(obj) ? [] : {};
-  for (const key in obj) {
-    cpy[key] = copy(obj[key]);
-  }
-  return cpy;
+function addError(results, type, code, msg, row?) {
+  results.errors.push({
+    type,
+    code,
+    message: msg,
+    row,
+  });
 }
 
 function processResults(results, config) {
-  // if (results && _delimiterError) {
-  //   addError(
-  //     'Delimiter',
-  //     'UndetectableDelimiter',
-  //     "Unable to auto-detect delimiting character; defaulted to '" + Papa.DefaultDelimiter + "'",
-  //   );
-  //   _delimiterError = false;
-  // }
+  let res = results;
+  if (results && results.delimiterError) {
+    addError(
+      results,
+      'Delimiter',
+      'UndetectableDelimiter',
+      `Unable to auto-detect delimiting character; defaulted to '${DEFAULT_DELIMITER}'`,
+    );
+    results.delimiterError = false;
+  }
 
   if (config.skipEmptyLines) {
-    for (let i = 0; i < results.data.length; i++) {
-      if (testEmptyLine(results.data[i])) {
+    for (let i = 0; i < res.data.length; i++) {
+      if (testEmptyLine(res.data[i], config.skipEmptyLines)) {
         results.data.splice(i--, 1);
       }
     }
   }
 
-  if (needsHeaderRow(config)) {
-    results = fillHeaderFields(results, config);
+  if (needsHeaderRow(config, res.fields)) {
+    res = fillHeaderFields(res, config);
   }
 
-  return applyHeaderAndDynamicTypingAndTransformation(results, config);
+  return applyHeaderAndDynamicTypingAndTransformation(res, config);
 }
 
 function shouldApplyDynamicTyping(field, config) {
@@ -176,22 +159,24 @@ function shouldApplyDynamicTyping(field, config) {
   if (config.dynamicTypingFunction && config.dynamicTyping[field] === undefined) {
     config.dynamicTyping[field] = config.dynamicTypingFunction(field);
   }
-  return (config.dynamicTyping[field] || config.dynamicTyping) === true;
+  return ((config.dynamicTyping && config.dynamicTyping[field]) || config.dynamicTyping) === true;
 }
 
-function parseDynamic(field, value, config) {
+function parseDynamic(field, value, config: Config) {
   if (shouldApplyDynamicTyping(field, config)) {
     if (value === 'true' || value === 'TRUE') {
       return true;
-    } else if (value === 'false' || value === 'FALSE') {
-      return false;
-    } else if (FLOAT.test(value)) {
-      return parseFloat(value);
-    } else if (ISO_DATE.test(value)) {
-      return new Date(value);
-    } else {
-      return value === '' ? null : value;
     }
+    if (value === 'false' || value === 'FALSE') {
+      return false;
+    }
+    if (FLOAT.test(value)) {
+      return parseFloat(value);
+    }
+    if (ISO_DATE.test(value)) {
+      return new Date(value);
+    }
+    return value === '' ? null : value;
   }
   return value;
 }
@@ -202,69 +187,77 @@ function applyHeaderAndDynamicTypingAndTransformation(results, config) {
   }
 
   for (let i = 0; i < results.data.length; i++) {
-    const row = config.header ? {} : [];
+    const row: any | any[] = config.header ? {} : [];
 
-    let j;
-    for (j = 0; j < results.data[i].length; j++) {
+    let j = 0;
+    for (; j < results.data[i].length; j++) {
       let field = j;
+      let parsedExtra = false;
       let value = results.data[i][j];
 
       if (config.header) {
-        field = j >= fields.length ? '__parsed_extra' : fields[j];
+        field = results.fields[j];
       }
 
       if (config.transform) {
         value = config.transform(value, field);
+        parsedExtra = j >= results.fields.length;
       }
 
       value = parseDynamic(field, value, config);
 
-      if (field === '__parsed_extra') {
-        row[field] = row[field] || [];
-        row[field].push(value);
+      if (parsedExtra) {
+        row.__parsed_extra = row.__parsed_extra || [];
+        row.__parsed_extra.push(value);
       } else {
         row[field] = value;
       }
     }
-
     results.data[i] = row;
 
-    // if (config.header) {
-    //   if (j > fields.length) {
-    //     addError(
-    //       'FieldMismatch',
-    //       'TooManyFields',
-    //       'Too many fields: expected ' + fields.length + ' fields but parsed ' + j,
-    //       _rowCounter + i,
-    //     );
-    //   } else if (j < fields.length) {
-    //     addError(
-    //       'FieldMismatch',
-    //       'TooFewFields',
-    //       'Too few fields: expected ' + fields.length + ' fields but parsed ' + j,
-    //       _rowCounter + i,
-    //     );
-    //   }
-    // }
-    return results;
+    if (config.header && j === results.fields.length) {
+      continue;
+    }
+    if (j > results.fields.length) {
+      addError(
+        'FieldMismatch',
+        'TooManyFields',
+        `Too many fields: expected ${results.fields.length} fields but parsed ${j}`,
+        results.rowCounter + i,
+      );
+    } else if (j < results.fields.length) {
+      addError(
+        'FieldMismatch',
+        'TooFewFields',
+        `Too few fields: expected ${results.fields.length} fields but parsed ${j}`,
+        results.rowCounter + i,
+      );
+    }
   }
 
   if (config.header && results.meta) {
-    results.meta.fields = fields;
+    results.meta.fields = results.fields;
   }
 
-  _rowCounter += results.data.length;
+  results.rowCounter += results.data.length;
   return results;
 }
 
-function start(input, results, config, baseIndex?, ignoreLastRow?) {
+export function start(input, config: Partial<Config> = {}, baseIndex?, ignoreLastRow?) {
+  let results = {
+    data: [],
+    errors: [],
+    meta: {} as any,
+    fields: [],
+    rowCounter: 0,
+    delimiterError: false,
+  };
   const quoteChar = config.quoteChar || '"';
   if (!config.newline) {
     config.newline = guessLineEndings(input, quoteChar);
   }
 
-  let _delimiterError = false;
-  let _paused;
+  // let _paused;
   if (!config.delimiter) {
     const delimGuess = guessDelimiter(
       input,
@@ -273,20 +266,19 @@ function start(input, results, config, baseIndex?, ignoreLastRow?) {
       config.skipEmptyLines,
       config.comments,
     );
-    console.log(delimGuess);
     if (delimGuess.successful) {
       config.delimiter = delimGuess.bestDelimiter;
     } else {
-      _delimiterError = true; // Add error after parsing (otherwise it would be overwritten)
+      results.delimiterError = true; // Add error after parsing (otherwise it would be overwritten)
       config.delimiter = DEFAULT_DELIMITER;
     }
     results.meta.delimiter = config.delimiter;
-  } else if (isFunction(config.delimiter)) {
+  } else if (typeof config.delimiter === 'function') {
     config.delimiter = config.delimiter(input);
     results.meta.delimiter = config.delimiter;
   }
 
-  const parserConfig = copy(config);
+  const parserConfig = { ...config };
   if (config.preview && config.header) {
     parserConfig.preview++;
   } // To compensate for header row
@@ -296,7 +288,172 @@ function start(input, results, config, baseIndex?, ignoreLastRow?) {
   return results;
 }
 
-function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
+type delimParse = (x: string) => string;
+
+export interface Config {
+  /**
+   * The delimiting character. Leave blank to auto-detect from a list of most common delimiters.
+   * It can be a string or a function. If string, it must be one of length 1. If a function, it
+   * must accept the input as first parameter and it must return a string which will be used as
+   * delimiter. In both cases it cannot be found in BAD_DELIMITERS.
+   *
+   * `default: ""`
+   */
+  delimiter: string | delimParse;
+  /**
+   * The newline sequence. Leave blank to auto-detect. Must be one of \r, \n, or \r\n.
+   *
+   * `default: ""`
+   */
+  newline: string;
+  /**
+   * The character used to quote fields. The quoting of all fields is not mandatory.
+   * Any field which is not quoted will correctly read.
+   *
+   * `default: '"'`
+   */
+  quoteChar: string;
+  /**
+   * The character used to escape the quote character within a field. If not set, this option will
+   * default to the value of quoteChar, meaning that the default escaping of quote character within
+   * a quoted field is using the quote character two times. (e.g. "column with ""quotes"" in text")
+   *
+   * `default: '"'`
+   */
+  escapeChar: string;
+  /**
+   * If true, the first row of parsed data will be interpreted as field names. An array of field names
+   * will be returned in meta, and each row of data will be an object of values keyed by field name
+   * instead of a simple array. Rows with a different number of fields from the header row will produce
+   * an error. **Warning**: Duplicate field names will overwrite values in previous fields having the same name.
+   *
+   * `default: false`
+   */
+  header: boolean;
+  /**
+   * A function to apply on each header. Requires header to be true. The function receives the header as its first argument.
+   *
+   * `default: undefined`
+   */
+  transformHeader: undefined;
+  /**
+   * If true, numeric and boolean data will be converted to their type instead of remaining strings.
+   * Numeric data must conform to the definition of a decimal literal. European-formatted numbers must
+   * have commas and dots swapped. If also accepts an object or a function. If object it's values should
+   * be a boolean to indicate if dynamic typing should be applied for each column number (or header name
+   * if using headers). If it's a function, it should return a boolean value for each field number
+   * (or name if using headers) which will be passed as first argument.
+   *
+   * `default: false`
+   */
+  dynamicTyping: boolean;
+  /**
+   * If > 0, only that many rows will be parsed.
+   *
+   * `default: 0`
+   */
+  preview: number;
+  /**
+   * The encoding to use when opening local files. If specified, it must be a value supported by
+   * the FileReader API.
+   *
+   * `default: ''`
+   */
+  encoding: string;
+  /**
+   * Whether or not to use a worker thread. Using a worker will keep your page reactive, but
+   * may be slightly slower. Web Workers also load the entire Javascript file, so be careful
+   * when combining other libraries in the same file as Papa Parse. Note that worker option
+   * is only available when parsing files and not when converting from JSON to CSV.
+   *
+   * `default: false`
+   */
+  worker: boolean;
+  /**
+   * A string that indicates a comment (for example, "#" or "//"). When Papa encounters a
+   * line starting with this string, it will skip the line.
+   *
+   * `default: false`
+   */
+  comments: boolean | string;
+
+  /**
+   * To stream the input, define a callback function:
+   * Streaming is necessary for large files which would otherwise crash the browser.
+   * You can call parser.abort() to abort parsing. And, except when using a Web Worker,
+   * you can call parser.pause() to pause it, and parser.resume() to resume.
+   *
+   * `default: undefined`
+   */
+  step: (results, parser?) => any;
+  /**
+   * The callback to execute when parsing is complete. It receives the parse results.
+   * If parsing a local file, the File is passed in, too:
+   * When streaming, parse results are not available in this callback.
+   */
+  complete: (results, file) => any;
+  /**
+   * 	A callback to execute if FileReader encounters an error. The function is passed
+   * two arguments: the error and the File.
+   *
+   * `default: undefined`
+   */
+  error: void;
+  /**
+   * If true, this indicates that the string you passed as the first argument to parse()
+   * is actually a URL from which to download a file and parse its contents.
+   *
+   * `default: false`
+   */
+  download: boolean;
+  /**
+   * If true, lines that are completely empty (those which evaluate to an empty string)
+   * will be skipped. If set to 'greedy', lines that don't have any content (those which
+   * have only whitespace after parsing) will also be skipped.
+   *
+   * `default: false`
+   */
+  skipEmptyLines: false | 'greedy';
+  /**
+   * 	A callback function, identical to step, which activates streaming. However, this
+   * function is executed after every chunk of the file is loaded and parsed rather than
+   * every row. Works only with local and remote files. Do not use both chunk and
+   * step callbacks together. For the function signature, see the documentation for
+   * the step function.
+   *
+   * `default: undefined`
+   */
+  chunk: void;
+  /**
+   * Fast mode speeds up parsing significantly for large inputs. However, it only works when
+   * the input has no quoted fields. Fast mode will automatically be enabled if no " characters
+   * appear in the input. You can force fast mode either way by setting it to true or false.
+   *
+   * `default: false`
+   */
+  fastMode: boolean;
+  /**
+   * A function to execute before parsing the first chunk. Can be used with chunk or step
+   * streaming modes. The function receives as an argument the chunk about to be parsed,
+   * and it may return a modified chunk to parse. This is useful for stripping header lines
+   * (as long as the header fits in a single chunk).
+   *
+   * `default: undefined`
+   */
+  beforeFirstChunk: void;
+  /**
+   * A function to apply on each value. The function receives the value as its first argument
+   * and the column number as its second argument. The return value of the function will replace
+   * the value it received. The transform function is applied before dynamicTyping.
+   */
+  transform: void;
+  /**
+   *
+   */
+  trimHeaders: boolean;
+}
+
+function parse(input, results, config: Partial<Config> = {}, baseIndex?, ignoreLastRow?) {
   // Unpack the config object
   let delim = config.delimiter;
   let newline = config.newline;
@@ -304,8 +461,11 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
   const step = config.step;
   const preview = config.preview;
   const fastMode = config.fastMode;
-  let quoteChar;
-  /** Allows for no quoteChar by setting quoteChar to undefined in config */
+  let quoteChar: string;
+
+  /**
+   * Allows for no quoteChar by setting quoteChar to undefined in config
+   */
   if (config.quoteChar === undefined) {
     quoteChar = '"';
   } else {
@@ -324,7 +484,8 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
   // Comment character must be valid
   if (comments === delim) {
     throw new Error('Comment character same as delimiter');
-  } else if (comments === true) {
+  }
+  if (comments === true) {
     comments = '#';
   } else if (typeof comments !== 'string' || BAD_DELIMITERS.indexOf(comments) > -1) {
     comments = false;
@@ -349,11 +510,9 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
   const inputLen = input.length;
   const delimLen = delim.length;
   const newlineLen = newline.length;
-  const commentsLen = comments.length;
-  const stepIsFunction = isFunction(step);
+  const commentsLen = typeof comments === 'string' ? comments.length : 0;
 
   // Establish starting state
-  cursor = 0;
   let data = [];
   let errors = [];
   let row: any = [];
@@ -376,7 +535,7 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
       if (comments && row.substr(0, commentsLen) === comments) {
         continue;
       }
-      if (stepIsFunction) {
+      if (typeof step === 'function') {
         data = [];
         pushRow(row.split(delim));
         doStep();
@@ -403,6 +562,7 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
   let quoteSearch;
 
   // Parser loop
+  // tslint:disable-next-line:no-constant-condition
   while (true) {
     // Field has opening quote
     if (input[cursor] === quoteChar) {
@@ -412,6 +572,7 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
       // Skip the opening quote
       cursor++;
 
+      // tslint:disable-next-line:no-constant-condition
       while (true) {
         // Find closing quote
         quoteSearch = input.indexOf(quoteChar, quoteSearch + 1);
@@ -474,7 +635,7 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
           saveRow(quoteSearch + 1 + spacesBetweenQuoteAndNewLine + newlineLen);
           nextDelim = input.indexOf(delim, cursor); // because we may have skipped the nextDelim in the quoted field
 
-          if (stepIsFunction) {
+          if (typeof step === 'function') {
             doStep();
             if (aborted) {
               return returnable();
@@ -529,7 +690,7 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
       row.push(input.substring(cursor, nextNewline));
       saveRow(nextNewline + newlineLen);
 
-      if (stepIsFunction) {
+      if (typeof step === 'function') {
         doStep();
         if (aborted) {
           return returnable();
@@ -548,8 +709,8 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
 
   return finish();
 
-  function pushRow(row) {
-    data.push(row);
+  function pushRow(r) {
+    data.push(r);
     lastCursor = cursor;
   }
 
@@ -557,7 +718,7 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
    * checks if there are extra spaces after closing quote and given index without any text
    * if Yes, returns the number of spaces
    */
-  function extraSpaces(index) {
+  function extraSpaces(index: number) {
     let spaceLength = 0;
     if (index !== -1) {
       const textBetweenClosingQuoteAndIndex = input.substring(quoteSearch + 1, index);
@@ -573,16 +734,17 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
    * row, saves the row, calls step, and returns the results.
    */
   function finish(value?) {
+    let val = value;
     if (ignoreLastRow) {
       return returnable();
     }
-    if (typeof value === 'undefined') {
-      value = input.substr(cursor);
+    if (val === undefined) {
+      val = input.substr(cursor);
     }
-    row.push(value);
+    row.push(val);
     cursor = inputLen; // important in case parsing is paused
     pushRow(row);
-    if (stepIsFunction) {
+    if (typeof step === 'function') {
       doStep();
     }
     return returnable();
@@ -601,11 +763,16 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
     nextNewline = input.indexOf(newline, cursor);
   }
 
-  /** Returns an object with the results, errors, and meta. */
+  /**
+   * Returns an object with the results, errors, and meta.
+   */
   function returnable(stopped?) {
     return {
       data,
       errors,
+      fields: results.fields,
+      rowCounter: results.rowCounter,
+      delimiterError: results.delimiterError,
       meta: {
         delimiter: delim,
         linebreak: newline,
@@ -616,24 +783,12 @@ function parse(input, results, config: any = {}, baseIndex?, ignoreLastRow?) {
     };
   }
 
-  /** Executes the user's step function and resets data & errors. */
+  /**
+   * Executes the user's step function and resets data & errors.
+   */
   function doStep() {
     step(returnable());
     data = [];
     errors = [];
   }
 }
-
-import fs from 'fs';
-const longSampleRawCsv = fs.readFileSync(__dirname + '/sample.csv', 'utf8');
-console.log(
-  start(
-    longSampleRawCsv,
-    {
-      data: [],
-      errors: [],
-      meta: {},
-    },
-    {},
-  ),
-);
